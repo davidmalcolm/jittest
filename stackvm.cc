@@ -1,82 +1,9 @@
 #include <assert.h>
 #include <stdio.h>
 
-// A simple stack-based virtual machine
-enum opcode {
-  DUP,
-  ROT,
-  PUSH_INT_CONST,
-  BINARY_INT_ADD,
-  BINARY_INT_SUBTRACT,
-  BINARY_INT_COMPARE_LT,
-  JUMP_ABS_IF_TRUE,
-  CALL_INT,
-  RETURN_INT,
-};
+#include "stackvm.h"
 
-class bytecode
-{
-public:
-  bytecode(const char *bytes, int len)
-    : m_bytes(bytes),
-      m_len(len)
-  {}
-
-  void disassemble(FILE *out) const;
-
-  void disassemble_at(FILE *out, int &pc) const;
-
-  enum opcode
-  fetch_opcode(int &pc) const;
-
-  int
-  fetch_arg_int(int &pc) const;
-
-private:
-  const char *m_bytes;
-  int m_len;
-};
-
-class frame
-{
-public:
-  frame()
-    : m_depth(0)
-  {}
-
-  int pop_int();
-  void push_int(int);
-
-  bool pop_bool() { return pop_int() != 0; }
-  void push_bool(bool flag) { push_int(flag ? 1 : 0); }
-
-  void debug_stack(FILE *out) const;
-
-private:
-  int m_stack[16];
-  int m_depth;
-};
-
-class toy_vm
-{
-public:
-  toy_vm(bytecode *code)
-    : m_bytecode(code)
-  {}
-  ~toy_vm() {}
-
-  int interpret(int arg);
-  void *compile();
-
-private:
-  void debug_begin_frame(int arg);
-  void debug_end_frame(int pc, int result);
-  void debug_begin_opcode(const frame &f, int pc);
-  void debug_end_opcode(int pc);
-
-private:
-  bytecode *m_bytecode;
-};
+using namespace stackvm;
 
 void bytecode::disassemble(FILE *out) const
 {
@@ -162,7 +89,7 @@ bytecode::fetch_arg_int(int &pc) const
   return static_cast<int>(m_bytes[pc++]);
 }
 
-int toy_vm::interpret(int input)
+int vm::interpret(int input)
 {
   frame f;
   int pc = 0;
@@ -272,18 +199,18 @@ void frame::debug_stack(FILE *out) const
   }
 }
 
-void toy_vm::debug_begin_frame(int arg)
+void vm::debug_begin_frame(int arg)
 {
   printf("begin frame: arg=%i\n", arg);
 }
 
-void toy_vm::debug_end_frame(int pc, int result)
+void vm::debug_end_frame(int pc, int result)
 {
   printf("end frame: result=%i\n", result);
   m_bytecode->disassemble_at(stdout, pc);
 }
 
-void toy_vm::debug_begin_opcode(const frame &f, int pc)
+void vm::debug_begin_opcode(const frame &f, int pc)
 {
   printf("begin opcode: ");
   m_bytecode->disassemble_at(stdout, pc);
@@ -291,12 +218,12 @@ void toy_vm::debug_begin_opcode(const frame &f, int pc)
   f.debug_stack(stdout);
 }
 
-void toy_vm::debug_end_opcode(int pc)
+void vm::debug_end_opcode(int pc)
 {
 }
 
 
-void *toy_vm::compile()
+void *vm::compile()
 {
 }
 
@@ -375,8 +302,8 @@ int main(int argc, const char **argv)
   bytecode * code = new bytecode(fibonacci, sizeof(fibonacci));
   code->disassemble(stdout);
 
-  toy_vm *vm = new toy_vm(code);
-  printf("vm->interpret(8) = %i\n", vm->interpret(8));
+  vm *v = new vm(code);
+  printf("v->interpret(8) = %i\n", v->interpret(8));
 
   // FIXME: compile
 

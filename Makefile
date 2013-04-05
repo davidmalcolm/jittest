@@ -1,5 +1,5 @@
 demo: jittest
 	./jittest
 
-jittest: jittest.cc
+jittest: stackvm.cc stackvm.h
 	g++ $< -o $@ -g
