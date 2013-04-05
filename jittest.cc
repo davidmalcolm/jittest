@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <stdio.h>
 
+// A simple stack-based virtual machine
 enum opcode {
   DUP,
   ROT,
@@ -36,12 +37,31 @@ private:
   int m_len;
 };
 
+class frame
+{
+public:
+  frame()
+    : m_depth(0)
+  {}
+
+  int pop_int();
+  void push_int(int);
+
+  bool pop_bool() { return pop_int() != 0; }
+  void push_bool(bool flag) { push_int(flag ? 1 : 0); }
+
+  void debug_stack(FILE *out) const;
+
+private:
+  int m_stack[16];
+  int m_depth;
+};
+
 class toy_vm
 {
 public:
   toy_vm(bytecode *code)
-    : m_bytecode(code),
-      m_depth(0)
+    : m_bytecode(code)
   {}
   ~toy_vm() {}
 
@@ -49,21 +69,13 @@ public:
   void *compile();
 
 private:
-  int pop_int();
-  void push_int(int);
-
-  bool pop_bool() { return pop_int() != 0; }
-  void push_bool(bool flag) { push_int(flag ? 1 : 0); }
-
   void debug_begin_frame(int arg);
   void debug_end_frame(int pc, int result);
-  void debug_begin_opcode(int pc);
+  void debug_begin_opcode(const frame &f, int pc);
   void debug_end_opcode(int pc);
 
 private:
   bytecode *m_bytecode;
-  int m_stack[16];
-  int m_depth;
 };
 
 void bytecode::disassemble(FILE *out) const
@@ -152,66 +164,67 @@ bytecode::fetch_arg_int(int &pc) const
 
 int toy_vm::interpret(int input)
 {
+  frame f;
   int pc = 0;
   debug_begin_frame(input);
-  push_int(input);
+  f.push_int(input);
   while (1) {
-    debug_begin_opcode(pc);
+    debug_begin_opcode(f, pc);
     enum opcode op = m_bytecode->fetch_opcode(pc);
     switch (op) {
       case DUP:
         {
-          int top = pop_int();
-          push_int(top);
-          push_int(top);
+          int top = f.pop_int();
+          f.push_int(top);
+          f.push_int(top);
         }
         break;
 
       case ROT:
         {
-          int first = pop_int();
-          int second = pop_int();
-          push_int(first);
-          push_int(second);
+          int first = f.pop_int();
+          int second = f.pop_int();
+          f.push_int(first);
+          f.push_int(second);
         }
         break;
 
       case PUSH_INT_CONST:
         {
-          push_int(m_bytecode->fetch_arg_int(pc));
+          f.push_int(m_bytecode->fetch_arg_int(pc));
         }
         break;
 
       case BINARY_INT_ADD:
         {
-          int rhs = pop_int();
-          int lhs = pop_int();
+          int rhs = f.pop_int();
+          int lhs = f.pop_int();
           int result = lhs + rhs;
-          push_int(result);
+          f.push_int(result);
         }
         break;
 
       case BINARY_INT_SUBTRACT:
         {
-          int rhs = pop_int();
-          int lhs = pop_int();
+          int rhs = f.pop_int();
+          int lhs = f.pop_int();
           int result = lhs - rhs;
-          push_int(result);
+          f.push_int(result);
         }
         break;
 
       case BINARY_INT_COMPARE_LT:
         {
-          int rhs = pop_int();
-          int lhs = pop_int();
+          int rhs = f.pop_int();
+          int lhs = f.pop_int();
           bool result = lhs < rhs;
-          push_bool(result);
+          f.push_bool(result);
         }
         break;
 
       case JUMP_ABS_IF_TRUE:
         {
-          bool flag = pop_bool();
+          bool flag = f.pop_bool();
           int dest = m_bytecode->fetch_arg_int(pc);
           if (flag) {
             pc = dest;
@@ -221,15 +234,15 @@ int toy_vm::interpret(int input)
 
       case CALL_INT:
         {
-          int arg = pop_int();
+          int arg = f.pop_int();
           int result = interpret(arg); //recurse
-          push_int(result);
+          f.push_int(result);
         }
         break;
 
       case RETURN_INT:
         {
-          int result = pop_int();
+          int result = f.pop_int();
           debug_end_frame(pc, result);
           return result;
         }
@@ -241,15 +254,22 @@ int toy_vm::interpret(int input)
   }
 }
 
-int toy_vm::pop_int()
+int frame::pop_int()
 {
   return m_stack[--m_depth];
 }
 
-void toy_vm::push_int(int val)
+void frame::push_int(int val)
 {
   assert(m_depth < 16);
   m_stack[m_depth++] = val;
+}
+
+void frame::debug_stack(FILE *out) const
+{
+  for (int i = 0; i < m_depth; i++) {
+    fprintf(out, "    depth %i: %i\n", i, m_stack[i]);
+  }
 }
 
 void toy_vm::debug_begin_frame(int arg)
@@ -263,14 +283,12 @@ void toy_vm::debug_end_frame(int pc, int result)
   m_bytecode->disassemble_at(stdout, pc);
 }
 
-void toy_vm::debug_begin_opcode(int pc)
+void toy_vm::debug_begin_opcode(const frame &f, int pc)
 {
   printf("begin opcode: ");
   m_bytecode->disassemble_at(stdout, pc);
   printf("  stack: \n");
-  for (int i = 0; i < m_depth; i++) {
-    printf("    depth %i: %i\n", i, m_stack[i]);
-  }
+  f.debug_stack(stdout);
 }
 
 void toy_vm::debug_end_opcode(int pc)
