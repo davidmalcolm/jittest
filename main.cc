@@ -88,5 +88,7 @@ int main(int argc, const char **argv)
   regcode->disassemble(stdout);
 
   regvm::vm *rv = new regvm::vm(regcode);
-  printf("rv->interpret(8) = %i\n", rv->interpret(8));
+  //printf("rv->interpret(8) = %i\n", rv->interpret(8));
+
+  //regcode->compile();
 }

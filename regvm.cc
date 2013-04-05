@@ -114,7 +114,7 @@ void instr::disassemble(FILE *out) const
 
 void wordcode::disassemble(FILE *out) const
 {
-  for (int pc = 0; pc < m_instrs.size(); /* */) {
+  for (int pc = 0; pc < (int)m_instrs.size(); /* */) {
     disassemble_at(out, pc);
   }
 }
@@ -130,6 +130,215 @@ wordcode::fetch_instr(int &pc) const
 {
   return m_instrs[pc++];
 }
+
+// Experimental JIT compilation via gcc-c-api:
+#if 0
+#define FAKE_TYPE(X) \
+  typedef struct X { \
+    void *inner;     \
+  } X;
+
+FAKE_TYPE(gcc_context)
+FAKE_TYPE(gcc_function)
+FAKE_TYPE(gcc_basic_block)
+FAKE_TYPE(gcc_tree)
+FAKE_TYPE(gcc_var_decl)
+FAKE_TYPE(gcc_gimple)
+
+enum gcc_expr_code
+{
+  EQ_EXPR
+};
+
+extern gcc_context
+gcc_context_new (void);
+
+extern gcc_function
+gcc_function_new (gcc_context ctxt);
+
+extern gcc_basic_block
+gcc_basic_block_new (gcc_context ctxt);
+
+extern gcc_gimple
+gcc_gimple_assign_new_COPY(gcc_context ctxt,
+                           gcc_tree dst,
+                           gcc_tree src);
+
+extern gcc_gimple
+gcc_gimple_assign_new_ADD(gcc_context ctxt,
+                          gcc_tree dst,
+                          gcc_tree lhs,
+                          gcc_tree rhs);
+
+extern gcc_gimple
+gcc_gimple_assign_new_SUBTRACT(gcc_context ctxt,
+                               gcc_tree dst,
+                               gcc_tree lhs,
+                               gcc_tree rhs);
+
+extern gcc_gimple
+gcc_gimple_assign_new_COMPARE_LT(gcc_context ctxt,
+                                 gcc_tree dst,
+                                 gcc_tree lhs,
+                                 gcc_tree rhs);
+
+extern gcc_gimple
+gcc_gimple_call_new(gcc_context ctxt,
+                    gcc_tree dst,
+                    /* FIXME: add the function itself! */
+                    gcc_tree arg);
+
+extern gcc_gimple
+gcc_gimple_cond_new(gcc_context ctxt,
+                    gcc_tree lhs,
+                    enum gcc_expr_code exprcode,
+                    gcc_tree rhs,
+                    gcc_basic_block on_true,
+                    gcc_basic_block on_false);
+
+extern gcc_gimple
+gcc_gimple_jump_new(gcc_context ctxt,
+                    gcc_basic_block dst);
+
+extern gcc_gimple
+gcc_gimple_return_new(gcc_context ctxt,
+                      gcc_tree retval);
+
+extern gcc_tree
+gcc_integer_const_new(gcc_context ctxt,
+                      int value);
+
+class frame_compiler
+{
+public:
+  // We will have one local per "register":
+  std::vector<gcc_var_decl> m_locals;
+
+  gcc_tree eval_int(const input& in) const;
+  gcc_tree get_output_reg(const instr &ins) const;
+
+  void set_bb(gcc_basic_block bb);
+  void add_gimple(gcc_gimple stmt);
+};
+
+void *wordcode::compile()
+{
+  frame_compiler f;
+  int pc;
+
+  gcc_context ctxt = gcc_context_new ();
+#if 0
+  gcc_function fn = gcc_function_new (ctxt);
+  gcc_type int_type = gcc_type_get_int (ctxt);
+  gcc_function_type fntype = gcc_function_type_new (ctxt,
+                                                    int_type,
+                                                    int_type);
+  gcc_declaration fndecl = gcc_function_decl_new(fntype, "fibonacci");
+#endif
+
+  // 1st pass: create one (empty) "basic block" per opcode:
+  // (do these ever get merged by gcc?)
+  std::vector<gcc_basic_block> bbs;
+  for (std::vector<instr>::iterator it = m_instrs.begin();
+       it != m_instrs.end();
+       ++it)
+    {
+      gcc_basic_block bb = gcc_basic_block_new (ctxt);
+      bbs.push_back(bb);
+    }
+
+  // 2nd pass: fill in gimple:
+  pc = 0;
+  for (pc = 0; pc < (int)m_instrs.size(); pc++)
+    {
+      gcc_basic_block bb = bbs[pc];
+      f.set_bb(bb);
+      const instr &ins = m_instrs[pc];
+      ins.disassemble(stdout);
+
+      switch (ins.m_op) {
+        case COPY_INT:
+        {
+          gcc_tree src = f.eval_int(ins.m_inputA);
+          gcc_tree dst = f.get_output_reg(ins);
+          f.add_gimple(gcc_gimple_assign_new_COPY(ctxt, dst, src));
+        }
+        break;
+
+      case BINARY_INT_ADD:
+        {
+          gcc_tree lhs = f.eval_int(ins.m_inputA);
+          gcc_tree rhs = f.eval_int(ins.m_inputB);
+          gcc_tree dst = f.get_output_reg(ins);
+          f.add_gimple(gcc_gimple_assign_new_ADD(ctxt, dst, lhs, rhs));
+        }
+        break;
+
+      case BINARY_INT_SUBTRACT:
+        {
+          gcc_tree lhs = f.eval_int(ins.m_inputA);
+          gcc_tree rhs = f.eval_int(ins.m_inputB);
+          gcc_tree dst = f.get_output_reg(ins);
+          f.add_gimple(gcc_gimple_assign_new_SUBTRACT(ctxt, dst, lhs, rhs));
+        }
+        break;
+
+      case BINARY_INT_COMPARE_LT:
+        {
+          gcc_tree lhs = f.eval_int(ins.m_inputA);
+          gcc_tree rhs = f.eval_int(ins.m_inputB);
+          gcc_tree dst = f.get_output_reg(ins);
+          f.add_gimple(gcc_gimple_assign_new_COMPARE_LT(ctxt, dst, lhs, rhs));
+        }
+        break;
+
+      case JUMP_ABS_IF_TRUE:
+        {
+          gcc_tree flag = f.eval_int(ins.m_inputA);
+          assert(ins.m_inputB.m_addrmode == CONSTANT);
+          int dest = ins.m_inputB.m_value;
+
+          gcc_basic_block on_true = bbs[dest];
+          gcc_basic_block on_false = bbs[pc + 1];
+
+          f.add_gimple(gcc_gimple_cond_new(ctxt,
+                                          flag,
+                                           EQ_EXPR,
+                                           gcc_integer_const_new(ctxt, 0),
+                                           on_true,
+                                           on_false));//falselabel
+        }
+        break;
+
+      case CALL_INT:
+        {
+          gcc_tree arg = f.eval_int(ins.m_inputA);
+          gcc_tree dst = f.get_output_reg(ins);
+          f.add_gimple(gcc_gimple_call_new(ctxt, dst, arg));
+        }
+        break;
+
+      case RETURN_INT:
+        {
+          gcc_tree result = f.eval_int(ins.m_inputA);
+          f.add_gimple(gcc_gimple_return_new(ctxt, result));
+        }
+        break;
+
+      default:
+        assert(0); // FIXME
+      }
+
+      if (ins.m_op != RETURN_INT &&
+          ins.m_op != JUMP_ABS_IF_TRUE)
+        {
+          gcc_basic_block nextbb = bbs[pc + 1];
+          f.add_gimple(gcc_gimple_jump_new(ctxt, nextbb));
+        }
+    }
+  return NULL;
+}
+#endif
 
 int vm::interpret(int input)
 {
@@ -272,10 +481,4 @@ void vm::debug_begin_opcode(const frame &f, int pc)
 
 void vm::debug_end_opcode(int pc)
 {
-}
-
-
-void *vm::compile()
-{
-  return NULL;
 }

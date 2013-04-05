@@ -64,6 +64,8 @@ public:
   int
   fetch_arg_int(int &pc) const;
 
+  void *compile();
+
 private:
   std::vector<instr> m_instrs;
 };
@@ -97,7 +99,6 @@ public:
   ~vm() {}
 
   int interpret(int arg);
-  void *compile();
 
 private:
   void debug_begin_frame(int arg);
