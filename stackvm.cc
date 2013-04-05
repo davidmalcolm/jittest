@@ -1,7 +1,10 @@
 #include <assert.h>
 #include <stdio.h>
+#include <vector>
+#include <map>
 
 #include "stackvm.h"
+#include "regvm.h"
 
 using namespace stackvm;
 
@@ -75,6 +78,199 @@ void bytecode::disassemble_at(FILE *out, int &pc) const
       default:
         assert(0); // FIXME
     }
+}
+
+class compilation_frame
+{
+public:
+  compilation_frame() :
+    m_depth(1) // 1 initial arg
+  {}
+
+  regvm::input get_accum() {
+    return regvm::input(regvm::REGISTER,
+                        regvm::NUM_REGISTERS - 1);
+  }
+
+  regvm::input pop_int();
+  void push_int(regvm::input);
+
+  regvm::input pop_bool() { return pop_int(); }
+  void push_bool(regvm::input abstrval) { push_int(abstrval); }
+
+  void add_instr(const regvm::instr&);
+
+  int next_instr_idx() { return m_instrs.size(); }
+
+  //private:
+  int m_depth;
+  std::vector<regvm::instr> m_instrs;
+};
+
+regvm::input compilation_frame::pop_int()
+{
+  return regvm::input(regvm::REGISTER, --m_depth);
+}
+
+void compilation_frame::push_int(regvm::input in)
+{
+  add_instr(regvm::instr(regvm::COPY_INT,
+
+                         // dst:
+                         m_depth++,
+
+                         // src:
+                         in));
+}
+
+void compilation_frame::add_instr(const regvm::instr& ins)
+{
+  printf("add_instr: [%i] ", (int)m_instrs.size());
+  ins.disassemble(stdout);
+  m_instrs.push_back(ins);
+}
+
+regvm::wordcode *
+bytecode::compile_to_regvm() const
+{
+  compilation_frame f;
+  int pc = 0;
+
+  // Map from offset within src opcodes to index of first generated instr
+  std::map<int, int> index_map;
+
+  while (pc < m_len) {
+    index_map.insert(std::make_pair(pc, f.next_instr_idx()));
+    enum opcode op = fetch_opcode(pc);
+    switch (op) {
+      case DUP:
+        {
+          regvm::input top = f.pop_int();
+          f.push_int(top);
+          f.push_int(top);
+        }
+        break;
+
+      case ROT:
+        {
+          regvm::input accum = f.get_accum();
+          f.add_instr(regvm::instr(regvm::COPY_INT,
+
+                                   // dst:
+                                   accum.m_value,
+
+                                   //src:
+                                   regvm::input(regvm::REGISTER,
+                                                f.m_depth - 1)));
+
+          f.add_instr(regvm::instr(regvm::COPY_INT,
+
+                                   // dst:
+                                   f.m_depth - 1,
+
+                                   //src:
+                                   regvm::input(regvm::REGISTER,
+                                                f.m_depth - 2)));
+          f.add_instr(regvm::instr(regvm::COPY_INT,
+
+                                   // dst:
+                                   f.m_depth - 2,
+
+                                   //src:
+                                   accum));
+        }
+        break;
+
+      case PUSH_INT_CONST:
+        {
+          f.push_int(regvm::input(regvm::CONSTANT,
+                                  fetch_arg_int(pc)));
+        }
+        break;
+
+      case BINARY_INT_ADD:
+        {
+          regvm::input rhs = f.pop_int();
+          regvm::input lhs = f.pop_int();
+          regvm::input accum = f.get_accum();
+          f.add_instr(regvm::instr(regvm::BINARY_INT_ADD,
+                                   accum.m_value,
+                                   lhs, rhs));
+          f.push_int(accum);
+        }
+        break;
+
+      case BINARY_INT_SUBTRACT:
+        {
+          regvm::input rhs = f.pop_int();
+          regvm::input lhs = f.pop_int();
+          regvm::input accum = f.get_accum();
+          f.add_instr(regvm::instr(regvm::BINARY_INT_SUBTRACT,
+                                   accum.m_value,
+                                   lhs, rhs));
+          f.push_int(accum);
+        }
+        break;
+
+      case BINARY_INT_COMPARE_LT:
+        {
+          regvm::input rhs = f.pop_int();
+          regvm::input lhs = f.pop_int();
+          regvm::input accum = f.get_accum();
+          f.add_instr(regvm::instr(regvm::BINARY_INT_COMPARE_LT,
+                                   accum.m_value,
+                                   lhs, rhs));
+          f.push_bool(accum);
+        }
+        break;
+
+      case JUMP_ABS_IF_TRUE:
+        {
+          regvm::input flag = f.pop_bool();
+          int dest = fetch_arg_int(pc);
+          f.add_instr(regvm::instr(regvm::JUMP_ABS_IF_TRUE,
+                                   0,
+                                   flag,
+                                   regvm::input(regvm::CONSTANT, dest)));
+          // the dest address gets patched below
+        }
+        break;
+
+      case CALL_INT:
+        {
+          regvm::input arg = f.pop_int();
+          regvm::input accum = f.get_accum();
+          f.add_instr(regvm::instr(regvm::CALL_INT,
+                                   accum.m_value,
+                                   arg));
+          f.push_int(accum);
+        }
+        break;
+
+      case RETURN_INT:
+        {
+          regvm::input result = f.pop_int();
+          f.add_instr(regvm::instr(regvm::RETURN_INT,
+                                   0,
+                                   result));
+        }
+        break;
+
+      default:
+        assert(0); // FIXME
+      }
+  }
+
+  // Patch jumps (from referring to offsets in src bytecode
+  // to referring to indices in generated wordcode)
+  for (unsigned int i = 0; i < f.m_instrs.size(); i++) {
+    regvm::instr &ins = f.m_instrs[i];
+    if (regvm::JUMP_ABS_IF_TRUE == ins.m_op) {
+      ins.m_inputB.m_value = index_map.find(ins.m_inputB.m_value)->second;
+    }
+  }
+
+  return new regvm::wordcode(f.m_instrs);
 }
 
 enum opcode
@@ -201,12 +397,12 @@ void frame::debug_stack(FILE *out) const
 
 void vm::debug_begin_frame(int arg)
 {
-  printf("begin frame: arg=%i\n", arg);
+  printf("BEGIN FRAME: arg=%i\n", arg);
 }
 
 void vm::debug_end_frame(int pc, int result)
 {
-  printf("end frame: result=%i\n", result);
+  printf("END FRAME: result=%i\n", result);
   m_bytecode->disassemble_at(stdout, pc);
 }
 
@@ -225,86 +421,5 @@ void vm::debug_end_opcode(int pc)
 
 void *vm::compile()
 {
-}
-
-/*
-   Simple recursive fibonacci implementation, roughly equivalent to:
-
-   int fibonacci(int arg)
-   {
-      if (arg < 2) {
-          return arg
-      }
-      return fibonacci(arg-1) + fibonacci(arg-2)
-   }
- */
-const char fibonacci[] = {
-  // stack: [arg]
-
-  // 0:
-  DUP,
-  // stack: [arg, arg]
-
-  // 1:
-  PUSH_INT_CONST, 2,
-  // stack: [arg, arg, 2]
-
-  // 3:
-  BINARY_INT_COMPARE_LT,
-  // stack: [arg, (arg < 2)]
-
-  // 4:
-  JUMP_ABS_IF_TRUE, 17,
-  // stack: [arg]
-
-  // 6:
-  DUP,
-  // stack: [arg, arg]
-
-  // 7:
-  PUSH_INT_CONST,  1,
-  // stack: [arg, arg, 1]
-
-  // 9:
-  BINARY_INT_SUBTRACT,
-  // stack: [arg,  (arg - 1)
-
-  // 10:
-  CALL_INT,
-  // stack: [arg, fib(arg - 1)]
-
-  // 11:
-  ROT,
-  // stack: [fib(arg - 1), arg]
-
-  // 12:
-  PUSH_INT_CONST,  2,
-  // stack: [fib(arg - 1), arg, 2]
-
-  // 14:
-  BINARY_INT_SUBTRACT,
-  // stack: [fib(arg - 1), arg,  (arg - 2)
-
-  // 15:
-  CALL_INT,
-  // stack: [fib(arg - 1), fib(arg - 1)]
-
-  // 16:
-  BINARY_INT_ADD,
-  // stack: [fib(arg - 1) + fib(arg - 1)]
-
-  // 17:
-  RETURN_INT
-};
-
-int main(int argc, const char **argv)
-{
-  bytecode * code = new bytecode(fibonacci, sizeof(fibonacci));
-  code->disassemble(stdout);
-
-  vm *v = new vm(code);
-  printf("v->interpret(8) = %i\n", v->interpret(8));
-
-  // FIXME: compile
-
+  return NULL;
 }
