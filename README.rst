@@ -24,7 +24,7 @@ stackvm programs can be interpreted, disassembled, and compiled to regvm
 programs.
 
 Here's what a simple recursive Fibonacci program looks like in stackvm
-bytecode:
+bytecode::
 
   [0] : DUP
   [1] : PUSH_INT_CONST 2
@@ -71,7 +71,7 @@ interprets it for one input, then compiles it to regvm, and interprets that
 again for one input.
 
 Here's what the Fibonacci program looks like after it's been compiled to
-regvm code:
+regvm code::
 
   [0] : R0 = R0;
   [1] : R1 = R0;
