@@ -29,7 +29,7 @@ static const int num_inputs[NUM_OPCODES] = {
   2, // BINARY_INT_ADD,
   2, // BINARY_INT_SUBTRACT,
   2, // BINARY_INT_COMPARE_LT,
-  1, // JUMP_ABS_IF_TRUE,
+  2, // JUMP_ABS_IF_TRUE,
   1, // CALL_INT,
   1, // RETURN_INT,
 };
@@ -40,6 +40,7 @@ instr::instr(enum opcode op, int output_reg, input a)
     m_inputA(a),
     m_inputB(CONSTANT, 0)
 {
+  assert(num_inputs[op] == 1);
 }
 
 
@@ -49,6 +50,7 @@ instr::instr(enum opcode op, int output_reg, input lhs, input rhs)
     m_inputA(lhs),
     m_inputB(rhs)
 {
+  assert(num_inputs[op] == 2);
 }
 
 static void
