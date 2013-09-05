@@ -94,6 +94,8 @@ const char fibonacci[] = {
   RETURN_INT
 };
 
+typedef int (*compiled_code) (int);
+
 int main(int argc, const char **argv)
 {
   stackvm::bytecode * scode = new stackvm::bytecode(fibonacci,
@@ -101,13 +103,14 @@ int main(int argc, const char **argv)
   scode->disassemble(stdout);
 
   stackvm::vm *sv = new stackvm::vm(scode);
-  //printf("sv->interpret(8) = %i\n", sv->interpret(8));
+  printf("sv->interpret(8) = %i\n", sv->interpret(8));
 
   regvm::wordcode * regcode = scode->compile_to_regvm();
   regcode->disassemble(stdout);
 
   regvm::vm *rv = new regvm::vm(regcode);
-  //printf("rv->interpret(8) = %i\n", rv->interpret(8));
+  printf("rv->interpret(8) = %i\n", rv->interpret(8));
 
-  //regcode->compile();
+  compiled_code code = (compiled_code)regcode->compile();
+  printf("code (8) = %i\n", code (8));
 }

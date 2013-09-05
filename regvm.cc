@@ -21,6 +21,7 @@
 #include <stdio.h>
 
 #include "regvm.h"
+#include "libgccjit.h"
 
 using namespace regvm;
 
@@ -152,212 +153,213 @@ wordcode::fetch_instr(int &pc) const
   return m_instrs[pc++];
 }
 
-// Experimental JIT compilation via gcc-c-api:
-#if 0
-#define FAKE_TYPE(X) \
-  typedef struct X { \
-    void *inner;     \
-  } X;
-
-FAKE_TYPE(gcc_context)
-FAKE_TYPE(gcc_function)
-FAKE_TYPE(gcc_basic_block)
-FAKE_TYPE(gcc_tree)
-FAKE_TYPE(gcc_var_decl)
-FAKE_TYPE(gcc_gimple)
-
-enum gcc_expr_code
-{
-  EQ_EXPR
-};
-
-extern gcc_context
-gcc_context_new (void);
-
-extern gcc_function
-gcc_function_new (gcc_context ctxt);
-
-extern gcc_basic_block
-gcc_basic_block_new (gcc_context ctxt);
-
-extern gcc_gimple
-gcc_gimple_assign_new_COPY(gcc_context ctxt,
-                           gcc_tree dst,
-                           gcc_tree src);
-
-extern gcc_gimple
-gcc_gimple_assign_new_ADD(gcc_context ctxt,
-                          gcc_tree dst,
-                          gcc_tree lhs,
-                          gcc_tree rhs);
-
-extern gcc_gimple
-gcc_gimple_assign_new_SUBTRACT(gcc_context ctxt,
-                               gcc_tree dst,
-                               gcc_tree lhs,
-                               gcc_tree rhs);
-
-extern gcc_gimple
-gcc_gimple_assign_new_COMPARE_LT(gcc_context ctxt,
-                                 gcc_tree dst,
-                                 gcc_tree lhs,
-                                 gcc_tree rhs);
-
-extern gcc_gimple
-gcc_gimple_call_new(gcc_context ctxt,
-                    gcc_tree dst,
-                    /* FIXME: add the function itself! */
-                    gcc_tree arg);
-
-extern gcc_gimple
-gcc_gimple_cond_new(gcc_context ctxt,
-                    gcc_tree lhs,
-                    enum gcc_expr_code exprcode,
-                    gcc_tree rhs,
-                    gcc_basic_block on_true,
-                    gcc_basic_block on_false);
-
-extern gcc_gimple
-gcc_gimple_jump_new(gcc_context ctxt,
-                    gcc_basic_block dst);
-
-extern gcc_gimple
-gcc_gimple_return_new(gcc_context ctxt,
-                      gcc_tree retval);
-
-extern gcc_tree
-gcc_integer_const_new(gcc_context ctxt,
-                      int value);
-
+// Experimental JIT compilation via libgccjit:
+#if 1
 class frame_compiler
 {
 public:
+  frame_compiler(gcc_jit_context *ctxt,
+                 gcc_jit_function *fn) :
+    m_ctxt(ctxt),
+    m_fn(fn),
+    m_int_type(gcc_jit_context_get_int_type (m_ctxt))
+  {
+    for (int i = 0; i < NUM_REGISTERS; i++) {
+      char buf[10];
+      sprintf (buf, "R%i", i);
+      gcc_jit_local *local =
+        gcc_jit_context_new_local (m_ctxt,
+                                   NULL,
+                                   m_int_type,
+                                   buf);
+      m_locals.push_back(local);
+    }
+  }
+
   // We will have one local per "register":
-  std::vector<gcc_var_decl> m_locals;
+  std::vector<gcc_jit_local *> m_locals;
 
-  gcc_tree eval_int(const input& in) const;
-  gcc_tree get_output_reg(const instr &ins) const;
+  gcc_jit_rvalue *eval_int(const input& in) const;
+  gcc_jit_lvalue *get_reg(int idx) const;
+  gcc_jit_lvalue *get_output_reg(const instr &ins) const;
 
-  void set_bb(gcc_basic_block bb);
-  void add_gimple(gcc_gimple stmt);
+private:
+  gcc_jit_context *m_ctxt;
+  gcc_jit_function *m_fn;
+  gcc_jit_type *m_int_type;
 };
+
+
+gcc_jit_rvalue *
+frame_compiler::eval_int(const input& in) const
+{
+  switch (in.m_addrmode) {
+  case CONSTANT:
+    return
+      gcc_jit_context_new_rvalue_from_int (m_ctxt,
+                                           m_int_type,
+                                           in.m_value);
+  case REGISTER:
+    assert(in.m_value >= 0);
+    assert(in.m_value < NUM_REGISTERS);
+    return gcc_jit_local_as_rvalue (m_locals[in.m_value]);
+
+  default:
+    assert(0);
+  }
+}
+
+gcc_jit_lvalue *
+frame_compiler::get_reg(int idx) const
+{
+  return gcc_jit_local_as_lvalue (m_locals[idx]);
+}
+
+gcc_jit_lvalue *
+frame_compiler::get_output_reg(const instr &ins) const
+{
+  return get_reg (ins.m_output_reg);
+}
 
 void *wordcode::compile()
 {
-  frame_compiler f;
+  gcc_jit_context *ctxt = gcc_jit_context_acquire ();
+
+  gcc_jit_context_set_code_factory (ctxt,
+                                    (gcc_jit_code_callback)compilation_cb,
+                                    this);
+  gcc_jit_result *result = gcc_jit_context_compile (ctxt);
+  gcc_git_context_release (ctxt);
+
+  return gcc_jit_result_get_code (result,
+                                  "fibonacci" /* FIXME */);
+  /* FIXME: this leaks "result" */
+}
+
+void
+wordcode::compilation_cb(gcc_jit_context *ctxt, wordcode *code)
+{
+  code->compilation_hook (ctxt);
+}
+
+void
+wordcode::compilation_hook (struct gcc_jit_context *ctxt)
+{
   int pc;
 
-  gcc_context ctxt = gcc_context_new ();
-#if 0
-  gcc_function fn = gcc_function_new (ctxt);
-  gcc_type int_type = gcc_type_get_int (ctxt);
-  gcc_function_type fntype = gcc_function_type_new (ctxt,
-                                                    int_type,
-                                                    int_type);
-  gcc_declaration fndecl = gcc_function_decl_new(fntype, "fibonacci");
-#endif
+  gcc_jit_type *int_type = gcc_jit_context_get_int_type (ctxt);
+  gcc_jit_param *param =
+    gcc_jit_context_new_param (ctxt, NULL, int_type, "input");
+  gcc_jit_function *fn =
+    gcc_jit_context_new_function_from_params (ctxt,
+                                              NULL,
+                                              int_type,
+                                              "fibonacci", /* FIXME */
+                                              1, &param);
+  frame_compiler f(ctxt, fn);
 
-  // 1st pass: create one (empty) "basic block" per opcode:
-  // (do these ever get merged by gcc?)
-  std::vector<gcc_basic_block> bbs;
+  // 1st pass: create forward labels, one per opcode:
+  std::vector<gcc_jit_label *> labels;
+  pc = 0;
   for (std::vector<instr>::iterator it = m_instrs.begin();
        it != m_instrs.end();
-       ++it)
+       ++it, ++pc)
     {
-      gcc_basic_block bb = gcc_basic_block_new (ctxt);
-      bbs.push_back(bb);
+      char buf[16];
+      sprintf (buf, "instr%i", pc);
+      gcc_jit_label *label = gcc_jit_function_new_forward_label (fn, buf);
+      labels.push_back(label);
     }
 
-  // 2nd pass: fill in gimple:
-  pc = 0;
+  // Assign param to R0:
+  gcc_jit_function_add_assignment (fn, NULL,
+                                   f.get_reg (0),
+                                   gcc_jit_param_as_rvalue (param));
+
+  // 2nd pass: fill in instructions:
   for (pc = 0; pc < (int)m_instrs.size(); pc++)
     {
-      gcc_basic_block bb = bbs[pc];
-      f.set_bb(bb);
+      gcc_jit_function_place_forward_label (fn, labels[pc]);
+
       const instr &ins = m_instrs[pc];
       ins.disassemble(stdout);
 
       switch (ins.m_op) {
         case COPY_INT:
         {
-          gcc_tree src = f.eval_int(ins.m_inputA);
-          gcc_tree dst = f.get_output_reg(ins);
-          f.add_gimple(gcc_gimple_assign_new_COPY(ctxt, dst, src));
+          gcc_jit_rvalue *src = f.eval_int(ins.m_inputA);
+          gcc_jit_lvalue *dst = f.get_output_reg(ins);
+          gcc_jit_function_add_assignment (fn, NULL, dst, src);
         }
         break;
 
       case BINARY_INT_ADD:
-        {
-          gcc_tree lhs = f.eval_int(ins.m_inputA);
-          gcc_tree rhs = f.eval_int(ins.m_inputB);
-          gcc_tree dst = f.get_output_reg(ins);
-          f.add_gimple(gcc_gimple_assign_new_ADD(ctxt, dst, lhs, rhs));
-        }
-        break;
-
       case BINARY_INT_SUBTRACT:
         {
-          gcc_tree lhs = f.eval_int(ins.m_inputA);
-          gcc_tree rhs = f.eval_int(ins.m_inputB);
-          gcc_tree dst = f.get_output_reg(ins);
-          f.add_gimple(gcc_gimple_assign_new_SUBTRACT(ctxt, dst, lhs, rhs));
+          enum gcc_jit_binary_op op
+            = ((ins.m_op == BINARY_INT_ADD)
+               ? GCC_JIT_BINARY_OP_PLUS : GCC_JIT_BINARY_OP_MINUS);
+          gcc_jit_rvalue *lhs = f.eval_int(ins.m_inputA);
+          gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
+          gcc_jit_lvalue *dst = f.get_output_reg(ins);
+          gcc_jit_function_add_assignment (
+            fn, NULL, dst,
+            gcc_jit_context_new_binary_op (ctxt, NULL, op,
+                                           int_type,
+                                           lhs, rhs));
         }
         break;
 
       case BINARY_INT_COMPARE_LT:
         {
-          gcc_tree lhs = f.eval_int(ins.m_inputA);
-          gcc_tree rhs = f.eval_int(ins.m_inputB);
-          gcc_tree dst = f.get_output_reg(ins);
-          f.add_gimple(gcc_gimple_assign_new_COMPARE_LT(ctxt, dst, lhs, rhs));
+          gcc_jit_rvalue *lhs = f.eval_int(ins.m_inputA);
+          gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
+          gcc_jit_lvalue *dst = f.get_output_reg(ins);
+          gcc_jit_function_add_assignment (
+            fn, NULL, dst,
+            gcc_jit_context_new_comparison (ctxt, NULL, GCC_JIT_COMPARISON_LT,
+                                            lhs, rhs));
         }
         break;
 
       case JUMP_ABS_IF_TRUE:
         {
-          gcc_tree flag = f.eval_int(ins.m_inputA);
+          gcc_jit_rvalue *flag = f.eval_int(ins.m_inputA);
           assert(ins.m_inputB.m_addrmode == CONSTANT);
           int dest = ins.m_inputB.m_value;
 
-          gcc_basic_block on_true = bbs[dest];
-          gcc_basic_block on_false = bbs[pc + 1];
+          gcc_jit_label *on_true = labels[dest];
+          gcc_jit_label *on_false = labels[pc + 1];
 
-          f.add_gimple(gcc_gimple_cond_new(ctxt,
-                                          flag,
-                                           EQ_EXPR,
-                                           gcc_integer_const_new(ctxt, 0),
-                                           on_true,
-                                           on_false));//falselabel
+          gcc_jit_function_add_conditional (fn, NULL,
+                                            flag,
+                                            on_true,
+                                            on_false);
         }
         break;
 
       case CALL_INT:
         {
-          gcc_tree arg = f.eval_int(ins.m_inputA);
-          gcc_tree dst = f.get_output_reg(ins);
-          f.add_gimple(gcc_gimple_call_new(ctxt, dst, arg));
+          gcc_jit_rvalue *arg = f.eval_int(ins.m_inputA);
+          gcc_jit_lvalue *dst = f.get_output_reg(ins);
+          gcc_jit_function_add_assignment (
+            fn, NULL, dst,
+            gcc_jit_context_new_call (ctxt, NULL, fn,
+                                      1, &arg));
         }
         break;
 
       case RETURN_INT:
         {
-          gcc_tree result = f.eval_int(ins.m_inputA);
-          f.add_gimple(gcc_gimple_return_new(ctxt, result));
+          gcc_jit_rvalue *result = f.eval_int(ins.m_inputA);
+          gcc_jit_function_add_return (fn, NULL, result);
         }
         break;
 
       default:
         assert(0); // FIXME
       }
-
-      if (ins.m_op != RETURN_INT &&
-          ins.m_op != JUMP_ABS_IF_TRUE)
-        {
-          gcc_basic_block nextbb = bbs[pc + 1];
-          f.add_gimple(gcc_gimple_jump_new(ctxt, nextbb));
-        }
     }
-  return NULL;
 }
 #endif
 

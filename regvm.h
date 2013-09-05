@@ -19,6 +19,8 @@
 
 #include <vector>
 
+struct gcc_jit_context;
+
 namespace regvm {
 
 const int NUM_REGISTERS = 4;
@@ -84,6 +86,13 @@ public:
   fetch_arg_int(int &pc) const;
 
   void *compile();
+
+private:
+  static void
+  compilation_cb (struct gcc_jit_context *ctxt,
+                  wordcode *code);
+  void
+  compilation_hook (struct gcc_jit_context *ctxt);
 
 private:
   std::vector<instr> m_instrs;
