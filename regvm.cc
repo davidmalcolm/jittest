@@ -229,7 +229,7 @@ void *wordcode::compile()
                                     (gcc_jit_code_callback)compilation_cb,
                                     this);
   gcc_jit_result *result = gcc_jit_context_compile (ctxt);
-  gcc_git_context_release (ctxt);
+  gcc_jit_context_release (ctxt);
 
   return gcc_jit_result_get_code (result,
                                   "fibonacci" /* FIXME */);
