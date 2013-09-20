@@ -236,10 +236,11 @@ void *wordcode::compile()
   /* FIXME: this leaks "result" */
 }
 
-void
+int
 wordcode::compilation_cb(gcc_jit_context *ctxt, wordcode *code)
 {
   code->compilation_hook (ctxt);
+  return 0;
 }
 
 void
@@ -251,11 +252,12 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
   gcc_jit_param *param =
     gcc_jit_context_new_param (ctxt, NULL, int_type, "input");
   gcc_jit_function *fn =
-    gcc_jit_context_new_function_from_params (ctxt,
-                                              NULL,
-                                              int_type,
-                                              "fibonacci", /* FIXME */
-                                              1, &param);
+    gcc_jit_context_new_function (ctxt,
+                                  NULL,
+                                  GCC_JIT_FUNCTION_EXPORTED,
+                                  int_type,
+                                  "fibonacci", /* FIXME */
+                                  1, &param, 0);
   frame_compiler f(ctxt, fn);
 
   // 1st pass: create forward labels, one per opcode:

@@ -88,7 +88,7 @@ public:
   void *compile();
 
 private:
-  static void
+  static int
   compilation_cb (struct gcc_jit_context *ctxt,
                   wordcode *code);
   void
