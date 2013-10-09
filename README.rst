@@ -71,7 +71,10 @@ interprets it for one input, then compiles it to regvm, and interprets that
 again for one input.
 
 Here's what the Fibonacci program looks like after it's been compiled to
-regvm code::
+regvm code.  Note that no optimization happens at this stage - it simply
+unrolls the stack manipulation into a set of "registers", where R0 is the
+bottom of the stack, R1 directly above it etc - so there's plenty of
+redundancy here::
 
   [0] : R0 = R0;
   [1] : R1 = R0;
@@ -97,8 +100,6 @@ regvm code::
   [21] : R3 = R0 + R1;
   [22] : R0 = R3;
   [23] : RETURN(R0);
-
-(clearly plenty of optimizations are possible on this code).
 
 The aim is to support just-in-time compilation of these programs to
 machine code, though this aspect is still a work-in-progress.
