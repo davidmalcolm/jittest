@@ -1,6 +1,7 @@
 This is a simple testbed intended for experiments with JIT compilation
 
-It builds an executable containing two virtual machines: stackvm and regvm
+It builds an executable containing two virtual machines: ``stackvm`` and
+``regvm``
 
 stackvm
 =======
@@ -20,11 +21,11 @@ It runs bytecode programs.  The following bytecodes are supported::
 It is intended as a (very simple) example of the kind of bytecode
 interpreter seen in dynamic languages such as Python, Ruby etc
 
-stackvm programs can be interpreted, disassembled, and compiled to regvm
-programs.
+``stackvm`` programs can be interpreted, disassembled, and compiled to
+``regvm`` programs.
 
-Here's what a simple recursive Fibonacci program looks like in stackvm
-bytecode::
+Here's what a simple recursive Fibonacci program looks like in
+``stackvm`` bytecode::
 
   [0] : DUP
   [1] : PUSH_INT_CONST 2
@@ -64,14 +65,14 @@ The following operations are supported::
 
 It is intended as a simpler VM from which to generate machine code.
 
-regvm programs can be interpreted and disassembled.
+``regvm`` programs can be interpreted and disassembled.
 
-The main program creates a simple recursive Fibonacci program using stackvm,
-interprets it for one input, then compiles it to regvm, and interprets that
+The main program creates a simple recursive Fibonacci program using ``stackvm``,
+interprets it for one input, then compiles it to ``regvm``, and interprets that
 again for one input.
 
 Here's what the Fibonacci program looks like after it's been compiled to
-regvm code.  Note that no optimization happens at this stage - it simply
+``regvm`` code.  Note that no optimization happens at this stage - it simply
 unrolls the stack manipulation into a set of "registers", where R0 is the
 bottom of the stack, R1 directly above it etc - so there's plenty of
 redundancy here::
@@ -101,8 +102,8 @@ redundancy here::
   [22] : R0 = R3;
   [23] : RETURN(R0);
 
-This can be interpreted (by regvm.cc:vm::interpret) or compiled (by
-regvm.cc:wordcode::compile).
+This can be interpreted (by ``regvm.cc:vm::interpret``) or compiled (by
+``regvm.cc:wordcode::compile``).
 
 The compiler uses my experimental libgccjit.so API for GCC:
 http://gcc.gnu.org/ml/gcc-patches/2013-10/msg00228.html
@@ -114,8 +115,8 @@ initial gimple representation of the code can be seen by setting::
                                    GCC_JIT_BOOL_OPTION_DUMP_INITIAL_GIMPLE,
                                    1);
 
-in `wordcode::compile` giving the following gimple dump, which closely
-resembles the regvm dump above (no optimization has happened yet.  There
+in ``wordcode::compile`` giving the following gimple dump, which closely
+resembles the ``regvm`` dump above (no optimization has happened yet. There
 is a label at every instruction, most of which are redundant as they aren't
 jump targets::
 
@@ -179,8 +180,8 @@ jump targets::
     return D.85;
   }
 
-You can see the various optimization steps that gcc_jit_compile performs
-by setting::
+You can see the various optimization steps that ``gcc_jit_context_compile``
+performs by setting::
 
   gcc_jit_context_set_bool_option (ctxt,
                                    GCC_JIT_BOOL_OPTION_KEEP_INTERMEDIATES,
