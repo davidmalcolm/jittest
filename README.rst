@@ -3,6 +3,11 @@ This is a simple testbed intended for experiments with JIT compilation
 It builds an executable containing two virtual machines: ``stackvm`` and
 ``regvm``
 
+It uses my experimental libgccjit.so_ code to compile ``regvm`` code
+to machine code and run it in-process.
+
+.. _libgccjit.so: http://gcc.gnu.org/wiki/JIT/
+
 stackvm
 =======
 A simple virtual machine in which each frame has a stack of integer values.
@@ -105,8 +110,7 @@ redundancy here::
 This can be interpreted (by ``regvm.cc:vm::interpret``) or compiled (by
 ``regvm.cc:wordcode::compile``).
 
-The compiler uses my experimental libgccjit.so API for GCC:
-http://gcc.gnu.org/ml/gcc-patches/2013-10/msg00228.html
+The compiler uses my experimental libgccjit.so_ API for GCC.
 
 One of GCC's internal representations is called "gimple".  A dump of the
 initial gimple representation of the code can be seen by setting::
