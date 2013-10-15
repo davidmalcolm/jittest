@@ -294,7 +294,7 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
   // 2nd pass: fill in instructions:
   for (pc = 0; pc < (int)m_instrs.size(); pc++)
     {
-      gcc_jit_function_place_forward_label (fn, labels[pc]);
+      gcc_jit_function_place_forward_label (fn, NULL, labels[pc]);
 
       const instr &ins = m_instrs[pc];
       ins.disassemble(stdout);
