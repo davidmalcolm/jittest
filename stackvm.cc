@@ -27,6 +27,13 @@
 
 using namespace stackvm;
 
+void bytecode::set_location(int pc, const char *filename, int linenum, int colnum)
+{
+  m_locations[pc].m_filename = filename;
+  m_locations[pc].m_linenum = linenum;
+  m_locations[pc].m_colnum = colnum;
+}
+
 void bytecode::disassemble(FILE *out) const
 {
   int pc = 0;
@@ -38,65 +45,71 @@ void bytecode::disassemble(FILE *out) const
 void bytecode::disassemble_at(FILE *out, int &pc) const
 {
     fprintf(out, "[%i] : ", pc);
+    const location &loc = m_locations[pc];
     enum opcode op = fetch_opcode(pc);
     switch (op) {
       case DUP:
         {
-          fprintf(out, "DUP\n");
+          fprintf(out, "DUP");
         }
         break;
 
       case ROT:
         {
-          fprintf(out, "ROT\n");
+          fprintf(out, "ROT");
         }
         break;
 
       case PUSH_INT_CONST:
         {
-          fprintf(out, "PUSH_INT_CONST %i\n", fetch_arg_int(pc));
+          fprintf(out, "PUSH_INT_CONST %i", fetch_arg_int(pc));
         }
         break;
 
       case BINARY_INT_ADD:
         {
-          fprintf(out, "BINARY_INT_ADD\n");
+          fprintf(out, "BINARY_INT_ADD");
         }
         break;
 
       case BINARY_INT_SUBTRACT:
         {
-          fprintf(out, "BINARY_INT_SUBTRACT\n");
+          fprintf(out, "BINARY_INT_SUBTRACT");
         }
         break;
 
       case BINARY_INT_COMPARE_LT:
         {
-          fprintf(out, "BINARY_INT_COMPARE_LT\n");
+          fprintf(out, "BINARY_INT_COMPARE_LT");
         }
         break;
 
       case JUMP_ABS_IF_TRUE:
         {
-          fprintf(out, "JUMP_ABS_IF_TRUE %i\n", fetch_arg_int(pc));
+          fprintf(out, "JUMP_ABS_IF_TRUE %i", fetch_arg_int(pc));
         }
         break;
 
       case CALL_INT:
         {
-          fprintf(out, "CALL_INT\n");
+          fprintf(out, "CALL_INT");
         }
         break;
 
       case RETURN_INT:
         {
-          fprintf(out, "RETURN_INT\n");
+          fprintf(out, "RETURN_INT");
         }
         break;
 
       default:
         assert(0); // FIXME
     }
+
+    if (loc.m_filename) {
+      fprintf(out," ; %s:%i:%i", loc.m_filename, loc.m_linenum, loc.m_colnum);
+    }
+    fprintf(out, "\n");
 }
 
 class compilation_frame
@@ -112,10 +125,10 @@ public:
   }
 
   regvm::input pop_int();
-  void push_int(regvm::input);
+  void push_int(regvm::input, const location &loc);
 
   regvm::input pop_bool() { return pop_int(); }
-  void push_bool(regvm::input abstrval) { push_int(abstrval); }
+  void push_bool(regvm::input abstrval, const location &loc) { push_int(abstrval, loc); }
 
   void add_instr(const regvm::instr&);
 
@@ -131,7 +144,7 @@ regvm::input compilation_frame::pop_int()
   return regvm::input(regvm::REGISTER, --m_depth);
 }
 
-void compilation_frame::push_int(regvm::input in)
+void compilation_frame::push_int(regvm::input in, const location &loc)
 {
   add_instr(regvm::instr(regvm::COPY_INT,
 
@@ -139,7 +152,9 @@ void compilation_frame::push_int(regvm::input in)
                          m_depth++,
 
                          // src:
-                         in));
+                         in,
+
+                         loc));
 }
 
 void compilation_frame::add_instr(const regvm::instr& ins)
@@ -160,13 +175,14 @@ bytecode::compile_to_regvm() const
 
   while (pc < m_len) {
     index_map.insert(std::make_pair(pc, f.next_instr_idx()));
+    const location &loc = m_locations[pc];
     enum opcode op = fetch_opcode(pc);
     switch (op) {
       case DUP:
         {
           regvm::input top = f.pop_int();
-          f.push_int(top);
-          f.push_int(top);
+          f.push_int(top, loc);
+          f.push_int(top, loc);
         }
         break;
 
@@ -180,7 +196,8 @@ bytecode::compile_to_regvm() const
 
                                    //src:
                                    regvm::input(regvm::REGISTER,
-                                                f.m_depth - 1)));
+                                                f.m_depth - 1),
+                                   loc));
 
           f.add_instr(regvm::instr(regvm::COPY_INT,
 
@@ -189,21 +206,24 @@ bytecode::compile_to_regvm() const
 
                                    //src:
                                    regvm::input(regvm::REGISTER,
-                                                f.m_depth - 2)));
+                                                f.m_depth - 2),
+                                   loc));
           f.add_instr(regvm::instr(regvm::COPY_INT,
 
                                    // dst:
                                    f.m_depth - 2,
 
                                    //src:
-                                   accum));
+                                   accum,
+                                   loc));
         }
         break;
 
       case PUSH_INT_CONST:
         {
           f.push_int(regvm::input(regvm::CONSTANT,
-                                  fetch_arg_int(pc)));
+                                  fetch_arg_int(pc)),
+                     loc);
         }
         break;
 
@@ -214,8 +234,9 @@ bytecode::compile_to_regvm() const
           regvm::input accum = f.get_accum();
           f.add_instr(regvm::instr(regvm::BINARY_INT_ADD,
                                    accum.m_value,
-                                   lhs, rhs));
-          f.push_int(accum);
+                                   lhs, rhs,
+                                   loc));
+          f.push_int(accum, loc);
         }
         break;
 
@@ -226,8 +247,9 @@ bytecode::compile_to_regvm() const
           regvm::input accum = f.get_accum();
           f.add_instr(regvm::instr(regvm::BINARY_INT_SUBTRACT,
                                    accum.m_value,
-                                   lhs, rhs));
-          f.push_int(accum);
+                                   lhs, rhs,
+                                   loc));
+          f.push_int(accum, loc);
         }
         break;
 
@@ -238,8 +260,9 @@ bytecode::compile_to_regvm() const
           regvm::input accum = f.get_accum();
           f.add_instr(regvm::instr(regvm::BINARY_INT_COMPARE_LT,
                                    accum.m_value,
-                                   lhs, rhs));
-          f.push_bool(accum);
+                                   lhs, rhs,
+                                   loc));
+          f.push_bool(accum, loc);
         }
         break;
 
@@ -250,7 +273,8 @@ bytecode::compile_to_regvm() const
           f.add_instr(regvm::instr(regvm::JUMP_ABS_IF_TRUE,
                                    0,
                                    flag,
-                                   regvm::input(regvm::CONSTANT, dest)));
+                                   regvm::input(regvm::CONSTANT, dest),
+                                   loc));
           // the dest address gets patched below
         }
         break;
@@ -261,8 +285,9 @@ bytecode::compile_to_regvm() const
           regvm::input accum = f.get_accum();
           f.add_instr(regvm::instr(regvm::CALL_INT,
                                    accum.m_value,
-                                   arg));
-          f.push_int(accum);
+                                   arg,
+                                   loc));
+          f.push_int(accum, loc);
         }
         break;
 
@@ -271,7 +296,8 @@ bytecode::compile_to_regvm() const
           regvm::input result = f.pop_int();
           f.add_instr(regvm::instr(regvm::RETURN_INT,
                                    0,
-                                   result));
+                                   result,
+                                   loc));
         }
         break;
 

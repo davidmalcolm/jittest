@@ -19,6 +19,8 @@
 
 #include <vector>
 
+#include "location.h"
+
 struct gcc_jit_context;
 
 namespace regvm {
@@ -56,9 +58,9 @@ struct input
 
 struct instr
 {
-  instr(enum opcode op, int output_reg, input a);
+  instr(enum opcode op, int output_reg, input a, const location &loc);
 
-  instr(enum opcode op, int output_reg, input lhs, input rhs);
+  instr(enum opcode op, int output_reg, input lhs, input rhs, const location &loc);
 
   void disassemble(FILE *out) const;
 
@@ -66,6 +68,8 @@ struct instr
   int m_output_reg;
   input m_inputA;
   input m_inputB;
+  /* Source location: */
+  location m_loc;
 };
 
 class wordcode

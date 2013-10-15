@@ -17,6 +17,8 @@
    <http://www.gnu.org/licenses/>.
 */
 
+#include "location.h"
+
 namespace regvm {
   class wordcode;
 };
@@ -41,8 +43,11 @@ class bytecode
 public:
   bytecode(const char *bytes, int len)
     : m_bytes(bytes),
-      m_len(len)
+      m_len(len),
+      m_locations(new location[len])
   {}
+
+  void set_location(int pc, const char *filename, int linenum, int colnum);
 
   void disassemble(FILE *out) const;
 
@@ -60,6 +65,7 @@ public:
 private:
   const char *m_bytes;
   int m_len;
+  location *m_locations;
 };
 
 class frame

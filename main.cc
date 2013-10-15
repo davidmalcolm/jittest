@@ -35,6 +35,7 @@
    }
  */
 using namespace stackvm;
+const int FIRST_LINE = __LINE__ + 5;
 const char fibonacci[] = {
   // stack: [arg]
 
@@ -100,6 +101,27 @@ int main(int argc, const char **argv)
 {
   stackvm::bytecode * scode = new stackvm::bytecode(fibonacci,
                                                     sizeof(fibonacci));
+
+  /* Set up line-numbering in bytecode to point into the array
+     initializer above, so that stepping through the JIT-generated
+     code in the debugger will step through the above.
+     We do it "by hand" here; in a real interpreter you'd presumably set
+     this up with information from your parser.  */
+  scode->set_location(0, __FILE__, FIRST_LINE + 0, 2);
+  scode->set_location(1, __FILE__, FIRST_LINE + 4, 2);
+  scode->set_location(3, __FILE__, FIRST_LINE + 8, 2);
+  scode->set_location(4, __FILE__, FIRST_LINE + 12, 2);
+  scode->set_location(6, __FILE__, FIRST_LINE + 16, 2);
+  scode->set_location(7, __FILE__, FIRST_LINE + 20, 2);
+  scode->set_location(9, __FILE__, FIRST_LINE + 24, 2);
+  scode->set_location(10, __FILE__, FIRST_LINE + 28, 2);
+  scode->set_location(11, __FILE__, FIRST_LINE + 32, 2);
+  scode->set_location(12, __FILE__, FIRST_LINE + 36, 2);
+  scode->set_location(14, __FILE__, FIRST_LINE + 40, 2);
+  scode->set_location(15, __FILE__, FIRST_LINE + 44, 2);
+  scode->set_location(16, __FILE__, FIRST_LINE + 48, 2);
+  scode->set_location(17, __FILE__, FIRST_LINE + 52, 2);
+
   scode->disassemble(stdout);
 
   stackvm::vm *sv = new stackvm::vm(scode);

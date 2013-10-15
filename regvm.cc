@@ -35,21 +35,23 @@ static const int num_inputs[NUM_OPCODES] = {
   1, // RETURN_INT,
 };
 
-instr::instr(enum opcode op, int output_reg, input a)
+instr::instr(enum opcode op, int output_reg, input a, const location &loc)
   : m_op(op),
     m_output_reg(output_reg),
     m_inputA(a),
-    m_inputB(CONSTANT, 0)
+    m_inputB(CONSTANT, 0),
+    m_loc(loc)
 {
   assert(num_inputs[op] == 1);
 }
 
 
-instr::instr(enum opcode op, int output_reg, input lhs, input rhs)
+instr::instr(enum opcode op, int output_reg, input lhs, input rhs, const location &loc)
   : m_op(op),
     m_output_reg(output_reg),
     m_inputA(lhs),
-    m_inputB(rhs)
+    m_inputB(rhs),
+    m_loc(loc)
 {
   assert(num_inputs[op] == 2);
 }
@@ -78,13 +80,24 @@ write_rvalue(FILE *out, input in)
 }
 
 static void
+write_any_loc(FILE *out, const instr &ins)
+{
+  const location &loc = ins.m_loc;
+  if (loc.m_filename) {
+    fprintf(out, " /* %s:%i:%i */", loc.m_filename, loc.m_linenum, loc.m_colnum);
+  }
+}
+
+static void
 write_binary_op(FILE *out, const instr &ins, const char *sym)
 {
     write_assign_to_lhs(out, ins.m_output_reg);
     write_rvalue(out, ins.m_inputA);
     fprintf(out, " %s ", sym);
     write_rvalue(out, ins.m_inputB);
-    fprintf(out, ";\n");
+    fprintf(out, ";");
+    write_any_loc(out, ins);
+    fprintf(out, "\n");
 }
 
 void instr::disassemble(FILE *out) const
@@ -93,7 +106,9 @@ void instr::disassemble(FILE *out) const
   case COPY_INT:
     write_assign_to_lhs(out, m_output_reg);
     write_rvalue(out, m_inputA);
-    fprintf(out, ";\n");
+    fprintf(out, ";");
+    write_any_loc(out, *this);
+    fprintf(out, "\n");
     break;
 
   case BINARY_INT_ADD:
@@ -113,20 +128,26 @@ void instr::disassemble(FILE *out) const
     write_rvalue(out, m_inputA);
     fprintf(out, ") GOTO ");
     write_rvalue(out, m_inputB);
-    fprintf(out, ";\n");
+    fprintf(out, ";");
+    write_any_loc(out, *this);
+    fprintf(out, "\n");
     break;
 
   case CALL_INT:
     write_assign_to_lhs(out, m_output_reg);
     fprintf(out, "CALL(");
     write_rvalue(out, m_inputA);
-    fprintf(out, ");\n");
+    fprintf(out, ");");
+    write_any_loc(out, *this);
+    fprintf(out, "\n");
     break;
 
   case RETURN_INT:
     fprintf(out, "RETURN(");
     write_rvalue(out, m_inputA);
-    fprintf(out, ");\n");
+    fprintf(out, ");");
+    write_any_loc(out, *this);
+    fprintf(out, "\n");
     break;
 
   default:
@@ -155,11 +176,24 @@ wordcode::fetch_instr(int &pc) const
 
 // Experimental JIT compilation via libgccjit:
 #if 1
+static gcc_jit_location *
+make_jit_loc(gcc_jit_context *ctxt, const struct location &loc)
+{
+  if (!loc.m_filename) {
+    return NULL;
+  }
+  return gcc_jit_context_new_location (ctxt,
+                                       loc.m_filename,
+                                       loc.m_linenum,
+                                       loc.m_colnum);
+}
+
 class frame_compiler
 {
 public:
   frame_compiler(gcc_jit_context *ctxt,
-                 gcc_jit_function *fn) :
+                 gcc_jit_function *fn,
+                 gcc_jit_location *fn_loc) :
     m_ctxt(ctxt),
     m_fn(fn),
     m_int_type(gcc_jit_context_get_int_type (m_ctxt))
@@ -169,7 +203,7 @@ public:
       sprintf (buf, "R%i", i);
       gcc_jit_local *local =
         gcc_jit_context_new_local (m_ctxt,
-                                   NULL,
+                                   fn_loc,
                                    m_int_type,
                                    buf);
       m_locals.push_back(local);
@@ -261,17 +295,19 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
 {
   int pc;
 
+  gcc_jit_location *fn_loc = make_jit_loc(ctxt, m_instrs[0].m_loc);
+
   gcc_jit_type *int_type = gcc_jit_context_get_int_type (ctxt);
   gcc_jit_param *param =
-    gcc_jit_context_new_param (ctxt, NULL, int_type, "input");
+    gcc_jit_context_new_param (ctxt, fn_loc, int_type, "input");
   gcc_jit_function *fn =
     gcc_jit_context_new_function (ctxt,
-                                  NULL,
+                                  make_jit_loc(ctxt, m_instrs[0].m_loc),
                                   GCC_JIT_FUNCTION_EXPORTED,
                                   int_type,
                                   "fibonacci", /* FIXME */
                                   1, &param, 0);
-  frame_compiler f(ctxt, fn);
+  frame_compiler f(ctxt, fn, fn_loc);
 
   // 1st pass: create forward labels, one per opcode:
   std::vector<gcc_jit_label *> labels;
@@ -287,14 +323,18 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
     }
 
   // Assign param to R0:
-  gcc_jit_function_add_assignment (fn, NULL,
+  gcc_jit_function_add_assignment (fn,
+                                   make_jit_loc(ctxt, m_instrs[0].m_loc),
                                    f.get_reg (0),
                                    gcc_jit_param_as_rvalue (param));
 
   // 2nd pass: fill in instructions:
   for (pc = 0; pc < (int)m_instrs.size(); pc++)
     {
-      gcc_jit_function_place_forward_label (fn, NULL, labels[pc]);
+      gcc_jit_location *loc = make_jit_loc(ctxt, m_instrs[pc].m_loc);
+      gcc_jit_function_place_forward_label (fn,
+                                            loc,
+                                            labels[pc]);
 
       const instr &ins = m_instrs[pc];
       ins.disassemble(stdout);
@@ -304,7 +344,7 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
         {
           gcc_jit_rvalue *src = f.eval_int(ins.m_inputA);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
-          gcc_jit_function_add_assignment (fn, NULL, dst, src);
+          gcc_jit_function_add_assignment (fn, loc, dst, src);
         }
         break;
 
@@ -318,8 +358,8 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
           gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
           gcc_jit_function_add_assignment (
-            fn, NULL, dst,
-            gcc_jit_context_new_binary_op (ctxt, NULL, op,
+            fn, loc, dst,
+            gcc_jit_context_new_binary_op (ctxt, loc, op,
                                            int_type,
                                            lhs, rhs));
         }
@@ -331,8 +371,8 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
           gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
           gcc_jit_function_add_assignment (
-            fn, NULL, dst,
-            gcc_jit_context_new_comparison (ctxt, NULL, GCC_JIT_COMPARISON_LT,
+            fn, loc, dst,
+            gcc_jit_context_new_comparison (ctxt, loc, GCC_JIT_COMPARISON_LT,
                                             lhs, rhs));
         }
         break;
@@ -346,7 +386,7 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
           gcc_jit_label *on_true = labels[dest];
           gcc_jit_label *on_false = labels[pc + 1];
 
-          gcc_jit_function_add_conditional (fn, NULL,
+          gcc_jit_function_add_conditional (fn, loc,
                                             flag,
                                             on_true,
                                             on_false);
@@ -358,8 +398,8 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
           gcc_jit_rvalue *arg = f.eval_int(ins.m_inputA);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
           gcc_jit_function_add_assignment (
-            fn, NULL, dst,
-            gcc_jit_context_new_call (ctxt, NULL, fn,
+            fn, loc, dst,
+            gcc_jit_context_new_call (ctxt, loc, fn,
                                       1, &arg));
         }
         break;
@@ -367,7 +407,7 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
       case RETURN_INT:
         {
           gcc_jit_rvalue *result = f.eval_int(ins.m_inputA);
-          gcc_jit_function_add_return (fn, NULL, result);
+          gcc_jit_function_add_return (fn, loc, result);
         }
         break;
 

@@ -500,3 +500,63 @@ and reviewing the files::
 
 This code is then injected into the process, and run (and calculates the
 correct result!).
+
+It's possible to set up "source code" locations for the bytecodes.  In our
+test example we do this in a rather contrived way by associating the
+``stackvm`` bytecodes with the locations in ``main.cc`` containing the
+table initializing them, but in a real interpreter you'd get this data
+from the parser.
+
+This source location data is carried through into the ``regvm`` code,
+then into the ``libgccjit.so`` represention, and into the
+JIT-compiled code.  By enabling::
+
+   gcc_jit_context_set_bool_option (ctxt,
+                                    GCC_JIT_BOOL_OPTION_DEBUGINFO,
+                                    1);
+
+and turning off optimizations with::
+
+   gcc_jit_context_set_int_option (ctxt,
+                                   GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL,
+                                   0);
+
+it's possible to step through the individual bytecodes in a debugger::
+
+  (gdb) break fibonacci
+  (gdb) run
+  Breakpoint 1, fibonacci (input=8) at main.cc:43
+  43	  DUP,
+  (gdb) list
+  38	const int FIRST_LINE = __LINE__ + 5;
+  39	const char fibonacci[] = {
+  40	  // stack: [arg]
+  41	
+  42	  // 0:
+  43	  DUP,
+  44	  // stack: [arg, arg]
+  45	
+  46	  // 1:
+  47	  PUSH_INT_CONST, 2,
+  (gdb) next
+  47	  PUSH_INT_CONST, 2,
+  (gdb) next
+  51	  BINARY_INT_COMPARE_LT,
+  (gdb) next
+  55	  JUMP_ABS_IF_TRUE, 17,
+  (gdb) next
+  59	  DUP,
+  (gdb) next
+  63	  PUSH_INT_CONST,  1,
+  (gdb) next
+  67	  BINARY_INT_SUBTRACT,
+  (gdb) next
+  71	  CALL_INT,
+  (gdb) next
+  Breakpoint 1, fibonacci (input=7) at main.cc:43
+  43	  DUP,
+  (...etc)
+
+It's also possible to step through with optimizations enabled, but
+execution appears to skip around the bytecodes in a manner typical
+for an optimizing compiler.
