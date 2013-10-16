@@ -201,17 +201,17 @@ public:
     for (int i = 0; i < NUM_REGISTERS; i++) {
       char buf[10];
       sprintf (buf, "R%i", i);
-      gcc_jit_local *local =
-        gcc_jit_context_new_local (m_ctxt,
-                                   fn_loc,
-                                   m_int_type,
-                                   buf);
+      gcc_jit_lvalue *local =
+        gcc_jit_function_new_local (fn,
+                                    fn_loc,
+                                    m_int_type,
+                                    buf);
       m_locals.push_back(local);
     }
   }
 
   // We will have one local per "register":
-  std::vector<gcc_jit_local *> m_locals;
+  std::vector<gcc_jit_lvalue *> m_locals;
 
   gcc_jit_rvalue *eval_int(const input& in) const;
   gcc_jit_lvalue *get_reg(int idx) const;
@@ -236,7 +236,7 @@ frame_compiler::eval_int(const input& in) const
   case REGISTER:
     assert(in.m_value >= 0);
     assert(in.m_value < NUM_REGISTERS);
-    return gcc_jit_local_as_rvalue (m_locals[in.m_value]);
+    return gcc_jit_lvalue_as_rvalue (m_locals[in.m_value]);
 
   default:
     assert(0);
@@ -246,7 +246,7 @@ frame_compiler::eval_int(const input& in) const
 gcc_jit_lvalue *
 frame_compiler::get_reg(int idx) const
 {
-  return gcc_jit_local_as_lvalue (m_locals[idx]);
+  return m_locals[idx];
 }
 
 gcc_jit_lvalue *
