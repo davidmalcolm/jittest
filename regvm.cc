@@ -196,7 +196,7 @@ public:
                  gcc_jit_location *fn_loc) :
     m_ctxt(ctxt),
     m_fn(fn),
-    m_int_type(gcc_jit_context_get_int_type (m_ctxt))
+    m_int_type(gcc_jit_context_get_type (m_ctxt, GCC_JIT_TYPE_INT))
   {
     for (int i = 0; i < NUM_REGISTERS; i++) {
       char buf[10];
@@ -297,7 +297,8 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
 
   gcc_jit_location *fn_loc = make_jit_loc(ctxt, m_instrs[0].m_loc);
 
-  gcc_jit_type *int_type = gcc_jit_context_get_int_type (ctxt);
+  gcc_jit_type *int_type =
+    gcc_jit_context_get_type (ctxt, GCC_JIT_TYPE_INT);
   gcc_jit_param *param =
     gcc_jit_context_new_param (ctxt, fn_loc, int_type, "input");
   gcc_jit_function *fn =
