@@ -272,27 +272,6 @@ void *wordcode::compile()
                                    GCC_JIT_BOOL_OPTION_DUMP_EVERYTHING,
                                    1);
 
-  gcc_jit_context_set_code_factory (ctxt,
-                                    (gcc_jit_code_callback)compilation_cb,
-                                    this);
-  gcc_jit_result *result = gcc_jit_context_compile (ctxt);
-  gcc_jit_context_release (ctxt);
-
-  return gcc_jit_result_get_code (result,
-                                  "fibonacci" /* FIXME */);
-  /* FIXME: this leaks "result" */
-}
-
-int
-wordcode::compilation_cb(gcc_jit_context *ctxt, wordcode *code)
-{
-  code->compilation_hook (ctxt);
-  return 0;
-}
-
-void
-wordcode::compilation_hook (struct gcc_jit_context *ctxt)
-{
   int pc;
 
   gcc_jit_location *fn_loc = make_jit_loc(ctxt, m_instrs[0].m_loc);
@@ -416,6 +395,13 @@ wordcode::compilation_hook (struct gcc_jit_context *ctxt)
         assert(0); // FIXME
       }
     }
+
+  gcc_jit_result *result = gcc_jit_context_compile (ctxt);
+  gcc_jit_context_release (ctxt);
+
+  return gcc_jit_result_get_code (result,
+                                  "fibonacci" /* FIXME */);
+  /* FIXME: this leaks "result" */
 }
 #endif
 

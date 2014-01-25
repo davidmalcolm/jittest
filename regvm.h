@@ -92,13 +92,6 @@ public:
   void *compile();
 
 private:
-  static int
-  compilation_cb (struct gcc_jit_context *ctxt,
-                  wordcode *code);
-  void
-  compilation_hook (struct gcc_jit_context *ctxt);
-
-private:
   std::vector<instr> m_instrs;
 };
 
