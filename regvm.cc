@@ -262,6 +262,9 @@ void *wordcode::compile()
   gcc_jit_context_set_bool_option (ctxt,
                                    GCC_JIT_BOOL_OPTION_DUMP_INITIAL_GIMPLE,
                                    1);
+  gcc_jit_context_set_bool_option (ctxt,
+                                   GCC_JIT_BOOL_OPTION_DUMP_GENERATED_CODE,
+                                   1);
   gcc_jit_context_set_int_option (ctxt,
                                   GCC_JIT_INT_OPTION_OPTIMIZATION_LEVEL,
                                   3);
