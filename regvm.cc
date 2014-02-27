@@ -292,8 +292,10 @@ void *wordcode::compile()
                                   1, &param, 0);
   frame_compiler f(ctxt, fn, fn_loc);
 
-  // 1st pass: create forward labels, one per opcode:
-  std::vector<gcc_jit_label *> labels;
+  gcc_jit_block *initial = gcc_jit_function_new_block (fn, "initial");
+
+  // 1st pass: create blocks, one per opcode:
+  std::vector<gcc_jit_block *> blocks;
   pc = 0;
   for (std::vector<instr>::iterator it = m_instrs.begin();
        it != m_instrs.end();
@@ -301,23 +303,24 @@ void *wordcode::compile()
     {
       char buf[16];
       sprintf (buf, "instr%i", pc);
-      gcc_jit_label *label = gcc_jit_function_new_forward_label (fn, buf);
-      labels.push_back(label);
+      gcc_jit_block *block = gcc_jit_function_new_block (fn, buf);
+      blocks.push_back(block);
     }
 
   // Assign param to R0:
-  gcc_jit_function_add_assignment (fn,
-                                   make_jit_loc(ctxt, m_instrs[0].m_loc),
-                                   f.get_reg (0),
-                                   gcc_jit_param_as_rvalue (param));
+  gcc_jit_block_add_assignment (initial,
+                                make_jit_loc(ctxt, m_instrs[0].m_loc),
+                                f.get_reg (0),
+                                gcc_jit_param_as_rvalue (param));
+  // ...and jump to insn 0
+  gcc_jit_block_end_with_jump (initial, NULL, blocks[0]);
 
   // 2nd pass: fill in instructions:
   for (pc = 0; pc < (int)m_instrs.size(); pc++)
     {
       gcc_jit_location *loc = make_jit_loc(ctxt, m_instrs[pc].m_loc);
-      gcc_jit_function_place_forward_label (fn,
-                                            loc,
-                                            labels[pc]);
+      gcc_jit_block *block = blocks[pc];
+      gcc_jit_block *next_block = (pc < (int)m_instrs.size()) ? blocks[pc + 1] : NULL;
 
       const instr &ins = m_instrs[pc];
       ins.disassemble(stdout);
@@ -327,7 +330,8 @@ void *wordcode::compile()
         {
           gcc_jit_rvalue *src = f.eval_int(ins.m_inputA);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
-          gcc_jit_function_add_assignment (fn, loc, dst, src);
+          gcc_jit_block_add_assignment (block, loc, dst, src);
+          gcc_jit_block_end_with_jump (block, loc, next_block);
         }
         break;
 
@@ -340,11 +344,12 @@ void *wordcode::compile()
           gcc_jit_rvalue *lhs = f.eval_int(ins.m_inputA);
           gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
-          gcc_jit_function_add_assignment (
-            fn, loc, dst,
+          gcc_jit_block_add_assignment (
+            block, loc, dst,
             gcc_jit_context_new_binary_op (ctxt, loc, op,
                                            int_type,
                                            lhs, rhs));
+          gcc_jit_block_end_with_jump (block, loc, next_block);
         }
         break;
 
@@ -353,10 +358,11 @@ void *wordcode::compile()
           gcc_jit_rvalue *lhs = f.eval_int(ins.m_inputA);
           gcc_jit_rvalue *rhs = f.eval_int(ins.m_inputB);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
-          gcc_jit_function_add_assignment (
-            fn, loc, dst,
+          gcc_jit_block_add_assignment (
+            block, loc, dst,
             gcc_jit_context_new_comparison (ctxt, loc, GCC_JIT_COMPARISON_LT,
                                             lhs, rhs));
+          gcc_jit_block_end_with_jump (block, loc, next_block);
         }
         break;
 
@@ -366,13 +372,13 @@ void *wordcode::compile()
           assert(ins.m_inputB.m_addrmode == CONSTANT);
           int dest = ins.m_inputB.m_value;
 
-          gcc_jit_label *on_true = labels[dest];
-          gcc_jit_label *on_false = labels[pc + 1];
+          gcc_jit_block *on_true = blocks[dest];
+          gcc_jit_block *on_false = blocks[pc + 1];
 
-          gcc_jit_function_add_conditional (fn, loc,
-                                            flag,
-                                            on_true,
-                                            on_false);
+          gcc_jit_block_end_with_conditional (block, loc,
+                                              flag,
+                                              on_true,
+                                              on_false);
         }
         break;
 
@@ -380,17 +386,18 @@ void *wordcode::compile()
         {
           gcc_jit_rvalue *arg = f.eval_int(ins.m_inputA);
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
-          gcc_jit_function_add_assignment (
-            fn, loc, dst,
+          gcc_jit_block_add_assignment (
+            block, loc, dst,
             gcc_jit_context_new_call (ctxt, loc, fn,
                                       1, &arg));
+          gcc_jit_block_end_with_jump (block, loc, next_block);
         }
         break;
 
       case RETURN_INT:
         {
           gcc_jit_rvalue *result = f.eval_int(ins.m_inputA);
-          gcc_jit_function_add_return (fn, loc, result);
+          gcc_jit_block_end_with_return (block, loc, result);
         }
         break;
 
