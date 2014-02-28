@@ -281,6 +281,8 @@ void *wordcode::compile()
 
   gcc_jit_type *int_type =
     gcc_jit_context_get_type (ctxt, GCC_JIT_TYPE_INT);
+  gcc_jit_type *bool_type =
+    gcc_jit_context_get_type (ctxt, GCC_JIT_TYPE_BOOL);
   gcc_jit_param *param =
     gcc_jit_context_new_param (ctxt, fn_loc, int_type, "input");
   gcc_jit_function *fn =
@@ -360,15 +362,21 @@ void *wordcode::compile()
           gcc_jit_lvalue *dst = f.get_output_reg(ins);
           gcc_jit_block_add_assignment (
             block, loc, dst,
-            gcc_jit_context_new_comparison (ctxt, loc, GCC_JIT_COMPARISON_LT,
-                                            lhs, rhs));
+            gcc_jit_context_new_cast (
+              ctxt, loc,
+              gcc_jit_context_new_comparison (ctxt, loc, GCC_JIT_COMPARISON_LT,
+                                              lhs, rhs),
+              int_type));
           gcc_jit_block_end_with_jump (block, loc, next_block);
         }
         break;
 
       case JUMP_ABS_IF_TRUE:
         {
-          gcc_jit_rvalue *flag = f.eval_int(ins.m_inputA);
+          gcc_jit_rvalue *int_flag = f.eval_int(ins.m_inputA);
+          gcc_jit_rvalue *bool_flag =
+            gcc_jit_context_new_cast (ctxt, loc, int_flag, bool_type);
+
           assert(ins.m_inputB.m_addrmode == CONSTANT);
           int dest = ins.m_inputB.m_value;
 
@@ -376,7 +384,7 @@ void *wordcode::compile()
           gcc_jit_block *on_false = blocks[pc + 1];
 
           gcc_jit_block_end_with_conditional (block, loc,
-                                              flag,
+                                              bool_flag,
                                               on_true,
                                               on_false);
         }
