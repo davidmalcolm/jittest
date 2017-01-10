@@ -448,7 +448,6 @@ void vm::debug_begin_frame(int arg)
 void vm::debug_end_frame(int pc, int result)
 {
   printf("END FRAME: result=%i\n", result);
-  m_bytecode->disassemble_at(stdout, pc);
 }
 
 void vm::debug_begin_opcode(const frame &f, int pc)
